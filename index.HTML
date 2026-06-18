@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Parampara Scanner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&display=swap" rel="stylesheet">
+    <style>
+        body { background-color: #000; color: white; touch-action: manipulation; }
+        #reader { width: 100%; border: none !important; }
+        #reader video { object-fit: cover; border-radius: 12px; }
+        .slide-up { animation: slideUp 0.3s ease-out forwards; }
+        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+    </style>
+</head>
+<body class="h-screen w-screen overflow-hidden flex flex-col relative">
+
+    <header class="bg-gray-900 p-4 text-center border-b border-gray-700 z-10 flex justify-between items-center">
+        <h1 class="font-[Cinzel] text-xl text-yellow-500">PARAMPARA</h1>
+        <div class="text-xs bg-gray-800 px-2 py-1 rounded text-gray-300">DB Sync: <span class="text-green-400">Offline</span></div>
+    </header>
+
+    <main class="flex-grow relative bg-black flex items-center justify-center p-2">
+        <div id="reader" class="w-full h-full max-h-[600px] overflow-hidden bg-gray-900 rounded-xl relative">
+            </div>
+        <div class="absolute bottom-4 left-0 w-full text-center text-gray-400 text-sm z-0">
+            Point camera at Parampara QR Pass
+        </div>
+    </main>
+
+    <div id="status-overlay" class="absolute inset-0 z-50 hidden flex-col justify-end">
+        <div id="status-card" class="bg-white text-black p-6 rounded-t-3xl h-3/4 flex flex-col slide-up shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
+            
+            <div id="vip-alert" class="hidden bg-orange-500 text-white p-3 rounded-lg mb-4 text-center animate-pulse">
+                <p class="font-bold text-lg">👑 VIP ARRIVED</p>
+                <p class="text-xs">Notify Reception Committee Instantly</p>
+            </div>
+
+            <div id="result-banner" class="text-center p-4 rounded-xl mb-4 text-white font-bold text-2xl">
+                </div>
+
+            <div class="text-center flex-grow">
+                <h2 id="attendee-name" class="text-3xl font-[Cinzel] font-bold mt-2">Rajesh Agarwal</h2>
+                <p id="attendee-club" class="text-gray-500 text-lg mt-1">Lions Club of Salt Lake</p>
+                
+                <div class="grid grid-cols-2 gap-3 mt-6">
+                    <button onclick="toggleService('meal')" id="btn-meal" class="py-3 rounded-lg font-bold border-2 border-gray-200 text-gray-500">🍽️ Dinner: ✗</button>
+                    <button onclick="toggleService('kit')" id="btn-kit" class="py-3 rounded-lg font-bold border-2 border-gray-200 text-gray-500">🎒 Kit: ✗</button>
+                </div>
+
+                <div id="pledge-section" class="mt-6 p-4 bg-yellow-50 rounded border border-yellow-200 hidden">
+                    <p class="text-xs text-yellow-800 font-bold mb-1">PARAMPARA LEDGER</p>
+                    <p class="text-xs text-gray-600 italic">"I pledge to carry forward the spirit of service."</p>
+                    <p class="text-[10px] text-green-600 mt-2">✓ Digitally Signed</p>
+                </div>
+            </div>
+
+            <button onclick="resetScanner()" class="w-full bg-gray-900 text-white py-4 rounded-xl font-bold text-lg mt-auto">
+                SCAN NEXT PASS
+            </button>
+        </div>
+    </div>
+
+    <nav class="bg-gray-900 p-4 pb-6 flex justify-around border-t border-gray-700 z-10">
+        <button class="text-yellow-500 flex flex-col items-center">📷 <span class="text-xs mt-1">Scan</span></button>
+        <button onclick="alert('Search Mode: Connects to same local DB')" class="text-gray-500 flex flex-col items-center">🔍 <span class="text-xs mt-1">Search</span></button>
+        <button onclick="alert('Walk-in Mode: Generates immediate ID')" class="text-gray-500 flex flex-col items-center">📝 <span class="text-xs mt-1">Walk-in</span></button>
+    </nav>
+
+    <script>
+        let html5QrcodeScanner;
+        let currentAttendeeId = null;
+
+        // Initialize Scanner
+        function initScanner() {
+            html5QrcodeScanner = new Html5Qrcode("reader");
+            const config = { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 };
+            html5QrcodeScanner.start({ facingMode: "environment" }, config, onScanSuccess).catch(err => {
+                document.getElementById('reader').innerHTML = `<div class="p-4 text-center text-red-500">Camera access denied or unavailable.</div>`;
+            });
+        }
+
+        // On Successful Scan
+        function onScanSuccess(decodedText) {
+            // Pause scanner
+            html5QrcodeScanner.pause(true);
+            
+            // Parse URI (parampara://attendee/P26001 -> P26001)
+            let id = decodedText;
+            if(decodedText.includes('/')) {
+                id = decodedText.split('/').pop();
+            }
+
+            processCheckIn(id);
+        }
+
+        function processCheckIn(id) {
+            currentAttendeeId = id;
+            const db = JSON.parse(localStorage.getItem('paramparaDB')) || {};
+            const attendee = db[id];
+            
+            const overlay = document.getElementById('status-overlay');
+            const banner = document.getElementById('result-banner');
+            const vipAlert = document.getElementById('vip-alert');
+            const pledge = document.getElementById('pledge-section');
+            
+            overlay.classList.remove('hidden');
+            overlay.classList.add('flex');
+
+            if (!attendee) {
+                // NOT FOUND
+                banner.className = "text-center p-4 rounded-xl mb-4 text-white font-bold text-2xl bg-gray-800";
+                banner.innerText = "❌ INVALID PASS";
+                document.getElementById('attendee-name').innerText = "Unknown ID: " + id;
+                document.getElementById('attendee-club').innerText = "Not found in database";
+                vipAlert.classList.add('hidden');
+                pledge.classList.add('hidden');
+                return;
+            }
+
+            // Populate Info
+            document.getElementById('attendee-name').innerText = attendee.name;
+            document.getElementById('attendee-club').innerText = attendee.club;
+            updateServiceButtons(attendee);
+
+            // VIP Logic
+            if (attendee.isVIP) {
+                vipAlert.classList.remove('hidden');
+            } else {
+                vipAlert.classList.add('hidden');
+            }
+
+            // Check-in Logic
+            if (attendee.checkedIn) {
+                // RED SCREEN
+                banner.className = "text-center p-4 rounded-xl mb-4 text-white font-bold text-2xl bg-red-600";
+                banner.innerText = `⚠️ ALREADY IN (${attendee.checkInTime})`;
+                pledge.classList.add('hidden');
+            } else {
+                // GREEN SCREEN
+                attendee.checkedIn = true;
+                const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                attendee.checkInTime = time;
+                db[id] = attendee;
+                localStorage.setItem('paramparaDB', JSON.stringify(db)); // Save to DB
+                
+                banner.className = "text-center p-4 rounded-xl mb-4 text-white font-bold text-2xl bg-green-600";
+                banner.innerText = "✓ CHECKED IN";
+                pledge.classList.remove('hidden'); // Show Parampara Ledger signature
+            }
+        }
+
+        // Handle Meal/Kit Toggles
+        function toggleService(type) {
+            if(!currentAttendeeId) return;
+            const db = JSON.parse(localStorage.getItem('paramparaDB'));
+            const attendee = db[currentAttendeeId];
+            
+            if(type === 'meal') attendee.mealRedeemed = !attendee.mealRedeemed;
+            if(type === 'kit') attendee.kitRedeemed = !attendee.kitRedeemed;
+            
+            db[currentAttendeeId] = attendee;
+            localStorage.setItem('paramparaDB', JSON.stringify(db));
+            updateServiceButtons(attendee);
+        }
+
+        function updateServiceButtons(attendee) {
+            const btnMeal = document.getElementById('btn-meal');
+            const btnKit = document.getElementById('btn-kit');
+            
+            if(attendee.mealRedeemed) {
+                btnMeal.className = "py-3 rounded-lg font-bold border-2 border-green-500 bg-green-50 text-green-700";
+                btnMeal.innerText = "🍽️ Dinner: ✓";
+            } else {
+                btnMeal.className = "py-3 rounded-lg font-bold border-2 border-gray-200 text-gray-500";
+                btnMeal.innerText = "🍽️ Dinner: ✗";
+            }
+
+            if(attendee.kitRedeemed) {
+                btnKit.className = "py-3 rounded-lg font-bold border-2 border-green-500 bg-green-50 text-green-700";
+                btnKit.innerText = "🎒 Kit: ✓";
+            } else {
+                btnKit.className = "py-3 rounded-lg font-bold border-2 border-gray-200 text-gray-500";
+                btnKit.innerText = "🎒 Kit: ✗";
+            }
+        }
+
+        // Reset Scanner for next person
+        function resetScanner() {
+            document.getElementById('status-overlay').classList.add('hidden');
+            document.getElementById('status-overlay').classList.remove('flex');
+            currentAttendeeId = null;
+            if(html5QrcodeScanner) html5QrcodeScanner.resume();
+        }
+
+        // Start scanner on load
+        window.onload = initScanner;
+    </script>
+</body>
+</html>
