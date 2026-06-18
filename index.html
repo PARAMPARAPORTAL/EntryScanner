@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Parampara Scanner | Search Enabled</title>
+    <title>Parampara Scanner | Live Sync</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&display=swap" rel="stylesheet">
@@ -13,7 +13,6 @@
         #reader video { object-fit: cover; border-radius: 12px; }
         .slide-up { animation: slideUp 0.3s ease-out forwards; }
         @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-        /* Custom scrollbar for search results */
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
     </style>
@@ -22,28 +21,21 @@
 
     <header class="bg-gray-900 p-4 text-center border-b border-gray-700 z-10 flex justify-between items-center">
         <h1 class="font-[Cinzel] text-xl text-yellow-500">PARAMPARA</h1>
-        <div class="text-xs bg-gray-800 px-2 py-1 rounded text-gray-300">Scanner Ready</div>
+        <div class="text-[10px] bg-gray-800 px-2 py-1 rounded text-gray-400 font-bold uppercase tracking-wider" id="db-status">Initializing...</div>
     </header>
 
     <main class="flex-grow relative bg-black flex items-center justify-center p-2">
-        <div id="reader" class="w-full h-full max-h-[600px] overflow-hidden bg-gray-900 rounded-xl relative">
-            </div>
-        <div class="absolute bottom-4 left-0 w-full text-center text-gray-400 text-sm z-0">
-            Point camera at Parampara QR Pass
-        </div>
+        <div id="reader" class="w-full h-full max-h-[600px] overflow-hidden bg-gray-900 rounded-xl relative"></div>
     </main>
 
     <div id="status-overlay" class="absolute inset-0 z-50 hidden flex-col justify-end">
         <div id="status-card" class="bg-white text-black p-6 rounded-t-3xl h-[85%] flex flex-col slide-up shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
             
-            <div id="result-banner" class="text-center p-4 rounded-xl mb-4 text-white font-bold text-2xl transition-colors duration-300">
-                </div>
+            <div id="result-banner" class="text-center p-4 rounded-xl mb-4 text-white font-bold text-2xl"></div>
 
             <div id="search-section" class="hidden flex-col flex-grow">
-                <p class="text-sm font-bold text-gray-600 mb-2">🔍 Search Database Override</p>
-                <input type="text" id="search-input" placeholder="Type Name or Phone Number..." class="w-full p-4 border-2 border-gray-300 rounded-xl text-lg focus:outline-none focus:border-yellow-500 mb-2">
-                <div id="search-results" class="flex-grow overflow-y-auto bg-gray-50 rounded-xl border border-gray-200 max-h-[250px]">
-                    </div>
+                <input type="text" id="search-input" placeholder="Type Name or Phone..." class="w-full p-4 border-2 border-gray-300 rounded-xl text-xl font-bold focus:outline-none focus:border-blue-500 mb-2">
+                <div id="search-results" class="flex-grow overflow-y-auto bg-gray-50 rounded-xl border border-gray-200 max-h-[300px]"></div>
             </div>
 
             <div id="attendee-details" class="text-center flex-grow flex flex-col hidden">
@@ -51,7 +43,7 @@
                 <p id="attendee-club" class="text-gray-500 text-lg mt-1">Club</p>
                 <p id="attendee-mobile" class="text-sm text-gray-400 mt-1">Mobile</p>
                 
-                <button id="btn-mark-present" onclick="forceCheckIn()" class="hidden w-full bg-blue-600 text-white py-4 rounded-xl font-bold text-xl mt-6 shadow-lg animate-bounce">
+                <button id="btn-mark-present" onclick="forceCheckIn()" class="hidden w-full bg-blue-600 text-white py-5 rounded-xl font-bold text-2xl mt-6 shadow-lg active:scale-95 transition-transform">
                     ✅ MARK PRESENT
                 </button>
 
@@ -62,7 +54,7 @@
             </div>
 
             <button onclick="resetScanner()" class="w-full bg-gray-900 text-white py-4 rounded-xl font-bold text-lg mt-4">
-                SCAN NEXT PASS
+                SCAN NEXT
             </button>
         </div>
     </div>
@@ -73,30 +65,65 @@
     </nav>
 
     <script>
+        const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxYen89iUeQl6H-HOexcpYwUQuDCxmAmrgFw5N82ItVuZz7uzN3J6jmxOxVgJMwCl1x9Q/exec";
+        
         let html5QrcodeScanner;
         let currentAttendeeId = null;
+        let localDB = {}; 
 
-        // --- MOCK DATABASE (For testing if empty) ---
-        // If localStorage is empty, let's inject some dummy data so you can test the search feature immediately.
-        function initializeTestDB() {
-            let db = JSON.parse(localStorage.getItem('paramparaDB'));
-            if (!db || Object.keys(db).length === 0) {
-                db = {
-                    "PMP0198": { id: "PMP0198", name: "Adarsh Narsaria", mobile: "9876543210", club: "Lions Club of Howrah", checkedIn: false },
-                    "PMP0199": { id: "PMP0199", name: "Swati Daga", mobile: "9988776655", club: "Lions Club of Howrah", checkedIn: false },
-                    "PMP0200": { id: "PMP0200", name: "Rajesh Agarwal", mobile: "8899001122", club: "Lions Club of Salt Lake", checkedIn: false }
-                };
-                localStorage.setItem('paramparaDB', JSON.stringify(db));
+        // LIVE SYNC ENGINE
+        async function initDB() {
+            // 1. Load what we have locally
+            localDB = JSON.parse(localStorage.getItem('paramparaDB')) || {};
+            
+            const statusBadge = document.getElementById('db-status');
+            statusBadge.innerText = "Syncing with Live Sheet...";
+            statusBadge.className = "text-[10px] bg-yellow-800 px-2 py-1 rounded text-yellow-400 font-bold uppercase tracking-wider animate-pulse";
+
+            try {
+                // 2. Fetch Live Google Sheet Data
+                const response = await fetch(APPS_SCRIPT_URL);
+                if (!response.ok) throw new Error("Network response was not ok");
+                const liveData = await response.json();
+
+                // 3. Merge Live Data securely
+                let syncCount = 0;
+                liveData.forEach(person => {
+                    if (person && person.id) {
+                        if (localDB[person.id]) {
+                            // Update details but preserve check-in / meal states
+                            localDB[person.id].name = person.name;
+                            localDB[person.id].mobile = person.mobile;
+                            localDB[person.id].club = person.club;
+                        } else {
+                            // Add new registration
+                            localDB[person.id] = person;
+                        }
+                        syncCount++;
+                    }
+                });
+
+                saveDB();
+                statusBadge.innerText = syncCount + " Live Records";
+                statusBadge.className = "text-[10px] bg-green-800 px-2 py-1 rounded text-green-400 font-bold uppercase tracking-wider";
+                
+            } catch (error) {
+                console.error("Failed to fetch live data - falling back to offline", error);
+                statusBadge.innerText = "Offline (" + Object.keys(localDB).length + ")";
+                statusBadge.className = "text-[10px] bg-red-800 px-2 py-1 rounded text-red-400 font-bold uppercase tracking-wider";
             }
         }
-        initializeTestDB();
-        // --------------------------------------------
+
+        function saveDB() {
+            localStorage.setItem('paramparaDB', JSON.stringify(localDB));
+        }
 
         function initScanner() {
+            initDB();
             html5QrcodeScanner = new Html5Qrcode("reader");
             const config = { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 };
             html5QrcodeScanner.start({ facingMode: "environment" }, config, onScanSuccess).catch(err => {
-                document.getElementById('reader').innerHTML = `<div class="p-4 text-center text-red-500">Camera access denied. Use Manual Search.</div>`;
+                document.getElementById('reader').innerHTML = `<div class="p-4 text-center text-red-500">Camera error. Use Search.</div>`;
             });
         }
 
@@ -106,207 +133,162 @@
             processCheckIn(id);
         }
 
+        // LIGHTNING FAST SEARCH
+        document.getElementById('search-input').addEventListener('input', function(e) {
+            const query = e.target.value.toLowerCase().trim();
+            const resultsContainer = document.getElementById('search-results');
+            resultsContainer.innerHTML = ''; 
+
+            if (query.length < 1) return;
+
+            const allRecords = Object.values(localDB);
+            
+            let matches = allRecords.filter(a => {
+                if (!a) return false;
+                const name = (a.name || "").toLowerCase();
+                const mobile = (a.mobile || "");
+                
+                return name.startsWith(query) || name.includes(" " + query) || mobile.startsWith(query);
+            });
+
+            matches.sort((a, b) => {
+                const nA = (a.name || "").toLowerCase();
+                const nB = (b.name || "").toLowerCase();
+                if(nA.startsWith(query) && !nB.startsWith(query)) return -1;
+                if(!nA.startsWith(query) && nB.startsWith(query)) return 1;
+                return nA.localeCompare(nB);
+            });
+
+            matches = matches.slice(0, 20);
+
+            if (matches.length === 0) {
+                resultsContainer.innerHTML = `<p class="p-4 text-center text-gray-500">No matching guests.</p>`;
+                return;
+            }
+
+            matches.forEach(a => {
+                const statusIcon = a.checkedIn ? '✅' : '⏳';
+                const div = document.createElement('div');
+                div.className = "p-4 border-b border-gray-200 active:bg-gray-200 cursor-pointer flex justify-between items-center";
+                div.innerHTML = `
+                    <div>
+                        <p class="font-bold text-lg text-black">${a.name || 'Unknown'}</p>
+                        <p class="text-sm text-gray-600">${a.club || 'No Club'} • ${a.mobile || 'No Mobile'}</p>
+                    </div>
+                    <div class="text-2xl">${statusIcon}</div>
+                `;
+                div.onclick = () => loadAttendeeFromSearch(a.id, a);
+                resultsContainer.appendChild(div);
+            });
+        });
+
         function processCheckIn(id) {
             currentAttendeeId = id;
-            const db = JSON.parse(localStorage.getItem('paramparaDB')) || {};
-            const attendee = db[id];
+            const attendee = localDB[id];
             
             const overlay = document.getElementById('status-overlay');
-            const banner = document.getElementById('result-banner');
-            const searchSection = document.getElementById('search-section');
-            const detailsSection = document.getElementById('attendee-details');
-            const btnMarkPresent = document.getElementById('btn-mark-present');
-            const serviceButtons = document.getElementById('service-buttons');
-            
             overlay.classList.remove('hidden');
             overlay.classList.add('flex');
 
-            // SCENARIO 1: ID NOT FOUND (The QR Issue)
             if (!attendee) {
-                banner.className = "text-center p-3 rounded-xl mb-2 text-white font-bold text-xl bg-gray-800";
-                banner.innerText = "❌ CODE NOT FOUND";
-                
-                detailsSection.classList.add('hidden');
-                searchSection.classList.remove('hidden');
-                searchSection.classList.add('flex');
-                
-                // Clear and focus search
+                document.getElementById('result-banner').className = "text-center p-3 rounded-xl mb-2 text-white font-bold text-xl bg-gray-800";
+                document.getElementById('result-banner').innerText = "❌ CODE NOT FOUND";
+                document.getElementById('attendee-details').classList.add('hidden');
+                document.getElementById('search-section').classList.remove('hidden');
+                document.getElementById('search-section').classList.add('flex');
                 document.getElementById('search-input').value = '';
                 document.getElementById('search-results').innerHTML = '';
                 setTimeout(() => document.getElementById('search-input').focus(), 100);
                 return;
             }
 
-            // SCENARIO 2: ID FOUND
-            searchSection.classList.add('hidden');
-            searchSection.classList.remove('flex');
-            detailsSection.classList.remove('hidden');
-            btnMarkPresent.classList.add('hidden'); // Hide manual override
-            serviceButtons.classList.remove('hidden'); // Show meal/kits
+            document.getElementById('search-section').classList.add('hidden');
+            document.getElementById('search-section').classList.remove('flex');
+            document.getElementById('attendee-details').classList.remove('hidden');
+            document.getElementById('btn-mark-present').classList.add('hidden');
+            document.getElementById('service-buttons').classList.remove('hidden');
 
-            document.getElementById('attendee-name').innerText = attendee.name;
-            document.getElementById('attendee-club').innerText = attendee.club;
-            document.getElementById('attendee-mobile').innerText = "📞 " + (attendee.mobile || "N/A");
-            
-            updateServiceButtons(attendee);
+            populateDetails(attendee);
 
             if (attendee.checkedIn) {
-                banner.className = "text-center p-4 rounded-xl mb-4 text-white font-bold text-2xl bg-red-600";
-                banner.innerText = `⚠️ ALREADY IN`;
+                document.getElementById('result-banner').className = "text-center p-4 rounded-xl mb-4 text-white font-bold text-2xl bg-red-600";
+                document.getElementById('result-banner').innerText = `⚠️ ALREADY IN`;
             } else {
                 executeCheckInLogic(id, attendee);
             }
         }
 
-        // --- SEARCH FUNCTIONALITY ---
-        document.getElementById('search-input').addEventListener('input', function(e) {
-            const query = e.target.value.toLowerCase();
-            const resultsContainer = document.getElementById('search-results');
-            resultsContainer.innerHTML = ''; // Clear previous
-
-            if (query.length < 2) return; // Wait for at least 2 characters
-
-            const db = JSON.parse(localStorage.getItem('paramparaDB')) || {};
-            
-            // Filter DB based on Name or Mobile
-            const matches = Object.keys(db).filter(key => {
-                const a = db[key];
-                const nameMatch = a.name && a.name.toLowerCase().includes(query);
-                const mobileMatch = a.mobile && a.mobile.includes(query);
-                return nameMatch || mobileMatch;
-            });
-
-            if (matches.length === 0) {
-                resultsContainer.innerHTML = `<p class="p-4 text-center text-gray-400">No matching guests found.</p>`;
-                return;
-            }
-
-            // Populate Results list
-            matches.forEach(key => {
-                const a = db[key];
-                const statusIcon = a.checkedIn ? '✅' : '⏳';
-                const div = document.createElement('div');
-                div.className = "p-4 border-b border-gray-200 active:bg-gray-200 cursor-pointer flex justify-between items-center";
-                div.innerHTML = `
-                    <div>
-                        <p class="font-bold text-lg">${a.name}</p>
-                        <p class="text-xs text-gray-500">${a.club} • ${a.mobile}</p>
-                    </div>
-                    <div class="text-2xl">${statusIcon}</div>
-                `;
-                // When clicked, load this attendee
-                div.onclick = () => loadAttendeeFromSearch(key, a);
-                resultsContainer.appendChild(div);
-            });
-        });
-
-        // When a volunteer taps a name from the search list
         function loadAttendeeFromSearch(id, attendee) {
-            currentAttendeeId = id; // Update global ID to the correct one
-            
+            currentAttendeeId = id; 
             document.getElementById('search-section').classList.add('hidden');
             document.getElementById('search-section').classList.remove('flex');
+            document.getElementById('attendee-details').classList.remove('hidden');
             
-            const detailsSection = document.getElementById('attendee-details');
-            detailsSection.classList.remove('hidden');
-            
-            document.getElementById('attendee-name').innerText = attendee.name;
-            document.getElementById('attendee-club').innerText = attendee.club;
-            document.getElementById('attendee-mobile').innerText = "📞 " + (attendee.mobile || "N/A");
-
-            const banner = document.getElementById('result-banner');
-            const btnMarkPresent = document.getElementById('btn-mark-present');
-            const serviceButtons = document.getElementById('service-buttons');
+            populateDetails(attendee);
 
             if (attendee.checkedIn) {
-                banner.className = "text-center p-4 rounded-xl mb-4 text-white font-bold text-2xl bg-red-600";
-                banner.innerText = `⚠️ ALREADY IN`;
-                btnMarkPresent.classList.add('hidden');
-                serviceButtons.classList.remove('hidden');
-                updateServiceButtons(attendee);
+                document.getElementById('result-banner').className = "text-center p-4 rounded-xl mb-4 text-white font-bold text-2xl bg-red-600";
+                document.getElementById('result-banner').innerText = `⚠️ ALREADY IN`;
+                document.getElementById('btn-mark-present').classList.add('hidden');
+                document.getElementById('service-buttons').classList.remove('hidden');
             } else {
-                // If NOT checked in yet, show the manual override button!
-                banner.className = "text-center p-3 rounded-xl mb-4 text-white font-bold text-xl bg-blue-600";
-                banner.innerText = "🔍 RECORD FOUND";
-                btnMarkPresent.classList.remove('hidden'); // SHOW THE BIG BUTTON
-                serviceButtons.classList.add('hidden'); // Hide kits until checked in
+                document.getElementById('result-banner').className = "text-center p-3 rounded-xl mb-4 text-white font-bold text-xl bg-blue-600";
+                document.getElementById('result-banner').innerText = "🔍 RECORD FOUND";
+                document.getElementById('btn-mark-present').classList.remove('hidden'); 
+                document.getElementById('service-buttons').classList.add('hidden'); 
             }
         }
 
-        // Triggered by the "✅ MARK PRESENT" button
-        function forceCheckIn() {
-            const db = JSON.parse(localStorage.getItem('paramparaDB')) || {};
-            const attendee = db[currentAttendeeId];
-            
-            if(!attendee) return;
+        function populateDetails(a) {
+            document.getElementById('attendee-name').innerText = a.name || "Unknown";
+            document.getElementById('attendee-club').innerText = a.club || "No Club";
+            document.getElementById('attendee-mobile').innerText = "📞 " + (a.mobile || "N/A");
+            updateServiceButtons(a);
+        }
 
-            executeCheckInLogic(currentAttendeeId, attendee);
-            
-            // Swap UI layout
+        function forceCheckIn() {
+            if(!currentAttendeeId || !localDB[currentAttendeeId]) return;
+            executeCheckInLogic(currentAttendeeId, localDB[currentAttendeeId]);
             document.getElementById('btn-mark-present').classList.add('hidden');
             document.getElementById('service-buttons').classList.remove('hidden');
+        }
+
+        function executeCheckInLogic(id, attendee) {
+            attendee.checkedIn = true;
+            localDB[id] = attendee;
+            saveDB(); 
+            
+            document.getElementById('result-banner').className = "text-center p-4 rounded-xl mb-4 text-white font-bold text-3xl bg-green-600 slide-up";
+            document.getElementById('result-banner').innerText = "✓ CHECKED IN";
             updateServiceButtons(attendee);
         }
 
-        // The actual logic that updates the database to Checked In
-        function executeCheckInLogic(id, attendee) {
-            attendee.checkedIn = true;
-            attendee.checkInTime = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-            
-            const db = JSON.parse(localStorage.getItem('paramparaDB')) || {};
-            db[id] = attendee;
-            localStorage.setItem('paramparaDB', JSON.stringify(db)); // SAVE TO DB
-            
-            const banner = document.getElementById('result-banner');
-            banner.className = "text-center p-4 rounded-xl mb-4 text-white font-bold text-3xl bg-green-600 slide-up";
-            banner.innerText = "✓ CHECKED IN";
-        }
-
-        // Trigger search from bottom nav bar directly
         function triggerManualSearch() {
             if(html5QrcodeScanner) html5QrcodeScanner.pause(true);
             const overlay = document.getElementById('status-overlay');
             overlay.classList.remove('hidden');
             overlay.classList.add('flex');
-            
-            // Force the Invalid scan scenario UI
-            processCheckIn("MANUAL_TRIGGER_FORCE_FAIL");
-            document.getElementById('result-banner').innerText = "🔍 MANUAL SEARCH";
+            processCheckIn("FORCE_MANUAL");
+            document.getElementById('result-banner').innerText = "🔍 TYPE TO SEARCH";
             document.getElementById('result-banner').className = "text-center p-3 rounded-xl mb-2 text-white font-bold text-xl bg-blue-800";
         }
 
         function toggleService(type) {
             if(!currentAttendeeId) return;
-            const db = JSON.parse(localStorage.getItem('paramparaDB'));
-            const attendee = db[currentAttendeeId];
-            
+            const attendee = localDB[currentAttendeeId];
             if(type === 'meal') attendee.mealRedeemed = !attendee.mealRedeemed;
             if(type === 'kit') attendee.kitRedeemed = !attendee.kitRedeemed;
-            
-            db[currentAttendeeId] = attendee;
-            localStorage.setItem('paramparaDB', JSON.stringify(db));
+            saveDB();
             updateServiceButtons(attendee);
         }
 
-        function updateServiceButtons(attendee) {
+        function updateServiceButtons(a) {
             const btnMeal = document.getElementById('btn-meal');
             const btnKit = document.getElementById('btn-kit');
-            
-            if(attendee.mealRedeemed) {
-                btnMeal.className = "py-3 rounded-lg font-bold border-2 border-green-500 bg-green-50 text-green-700";
-                btnMeal.innerText = "🍽️ Dinner: ✓";
-            } else {
-                btnMeal.className = "py-3 rounded-lg font-bold border-2 border-gray-200 text-gray-500";
-                btnMeal.innerText = "🍽️ Dinner: ✗";
-            }
-
-            if(attendee.kitRedeemed) {
-                btnKit.className = "py-3 rounded-lg font-bold border-2 border-green-500 bg-green-50 text-green-700";
-                btnKit.innerText = "🎒 Kit: ✓";
-            } else {
-                btnKit.className = "py-3 rounded-lg font-bold border-2 border-gray-200 text-gray-500";
-                btnKit.innerText = "🎒 Kit: ✗";
-            }
+            btnMeal.className = a.mealRedeemed ? "py-3 rounded-lg font-bold border-2 border-green-500 bg-green-50 text-green-700" : "py-3 rounded-lg font-bold border-2 border-gray-200 text-gray-500";
+            btnMeal.innerText = a.mealRedeemed ? "🍽️ Dinner: ✓" : "🍽️ Dinner: ✗";
+            btnKit.className = a.kitRedeemed ? "py-3 rounded-lg font-bold border-2 border-green-500 bg-green-50 text-green-700" : "py-3 rounded-lg font-bold border-2 border-gray-200 text-gray-500";
+            btnKit.innerText = a.kitRedeemed ? "🎒 Kit: ✓" : "🎒 Kit: ✗";
         }
 
         function resetScanner() {
