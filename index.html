@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Parampara Scanner | Live Sync</title>
+    <title>Parampara Scanner | Live Sync & Update</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&display=swap" rel="stylesheet">
@@ -95,6 +95,8 @@
                             localDB[person.id].name = person.name;
                             localDB[person.id].mobile = person.mobile;
                             localDB[person.id].club = person.club;
+                            // Ensure checkedIn status syncs correctly from the sheet if already marked
+                            if (person.checkedIn) localDB[person.id].checkedIn = true;
                         } else {
                             // Add new registration
                             localDB[person.id] = person;
@@ -254,6 +256,7 @@
         }
 
         function executeCheckInLogic(id, attendee) {
+            // 1. Instantly update the phone UI 
             attendee.checkedIn = true;
             localDB[id] = attendee;
             saveDB(); 
@@ -261,6 +264,22 @@
             document.getElementById('result-banner').className = "text-center p-4 rounded-xl mb-4 text-white font-bold text-3xl bg-green-600 slide-up";
             document.getElementById('result-banner').innerText = "✓ CHECKED IN";
             updateServiceButtons(attendee);
+
+            // 2. Format the JSON payload for the Apps Script
+            const payload = {
+                action: "markAttendance",
+                registrationId: id,
+                volunteer: "Scanner App"
+            };
+
+            // 3. Send to Google Sheets in the background
+            fetch(APPS_SCRIPT_URL, {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            })
+            .then(response => response.json())
+            .then(data => console.log("Google Sheet Updated: ", data))
+            .catch(error => console.error("Saved locally, but failed to reach Google Sheet", error));
         }
 
         function triggerManualSearch() {
